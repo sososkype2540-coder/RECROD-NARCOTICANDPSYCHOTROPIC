@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบควบคุมยาเสพติดและวัตถุออกฤทธิ์ (เชื่อม Google Sheet)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Tahoma","Segoe UI",sans-serif; margin:0; background:#f2f4f7; color:#222; }
+  header { background:#1d3b5e; color:#fff; padding:14px 20px; }
+  header h1 { margin:0; font-size:20px; }
+  .configBar { background:#fff3cd; padding:10px 20px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px; }
+  .configBar input { flex:1; min-width:300px; padding:6px 8px; }
+  nav { display:flex; gap:6px; padding:10px 16px; background:#16304d; flex-wrap:wrap; }
+  nav button { background:#2a4f7c; color:#fff; border:none; padding:10px 16px; border-radius:6px; cursor:pointer; font-size:14px; }
+  nav button.active { background:#ffb020; color:#222; font-weight:bold; }
+  main { padding:16px; max-width:1300px; margin:0 auto; }
+  .card { background:#fff; border-radius:10px; padding:16px; margin-bottom:16px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  h2 { margin-top:0; font-size:17px; border-bottom:2px solid #eee; padding-bottom:8px; }
+  h3 { font-size:15px; color:#1d3b5e; }
+  label { font-size:13px; font-weight:bold; margin-right:4px; }
+  input, select { padding:6px 8px; border:1px solid #ccc; border-radius:5px; font-size:13px; }
+  input[type=number] { width:80px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; }
+  table { border-collapse: collapse; width:100%; font-size:13px; }
+  th, td { border:1px solid #ddd; padding:6px 8px; text-align:center; }
+  th { background:#1d3b5e; color:#fff; }
+  tbody tr:nth-child(even) { background:#f8f9fb; }
+  .tableWrap { overflow-x:auto; }
+  button.btn { background:#1d3b5e; color:#fff; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+  button.btn.red { background:#c0392b; }
+  button.btn.green { background:#27ae60; }
+  button.btn.gray { background:#7f8c8d; }
+  .ok { color:#27ae60; font-weight:bold; }
+  .bad { color:#c0392b; font-weight:bold; }
+  .hint { font-size:11px; color:#888; }
+  .hidden { display:none; }
+  .histList { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .histBtn { background:#eef2f7; border:1px solid #ccd; padding:5px 10px; border-radius:5px; cursor:pointer; font-size:12px; }
+  #statusMsg { font-size:12px; margin-left:8px; }
+  @media print {
+    nav, .no-print, .configBar { display:none !important; }
+    .card { box-shadow:none; }
+    body { background:#fff; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ระบบบันทึกการเบิก–ใช้ยาเสพติดและวัตถุออกฤทธิ์ต่อจิตประสาท</h1>
+</header>
+
+<div class="configBar no-print">
+  <label>Google Sheet Web App URL:</label>
+  <input id="scriptUrlInput" type="text" placeholder="วาง URL ที่ได้จาก Apps Script Deploy ที่นี่">
+  <button class="btn green" onclick="saveScriptUrl()">บันทึก URL</button>
+  <button class="btn gray" onclick="refreshFromSheet()">🔄 รีเฟรชข้อมูลจาก Sheet</button>
+  <span id="statusMsg"></span>
+</div>
+
+<nav class="no-print">
+  <button id="navBtn1" class="active" onclick="showTab(1)">ส่วนที่ 1: เบิกยาจากคลัง (ห้องยา/OR)</button>
+  <button id="navBtn2" onclick="showTab(2)">ส่วนที่ 2: นับสต็อกห้องยา</button>
+  <button id="navBtn3" onclick="showTab(3)">ส่วนที่ 3: สรุปยอด (คลังยา/ห้องยา/คลังใหญ่/OR)</button>
+  <button class="btn gray" onclick="window.print()">🖨 พิมพ์หน้านี้</button>
+</nav>
+
+<main>
+
+<!-- ============ ส่วนที่ 1 : เบิกยาจากคลัง ============ -->
+<section id="tab1">
+  <div class="card">
+    <h2>ส่วนที่ 1.1 — เบิกยาจากคลัง : ห้องยา และ OR</h2>
+    <div class="row">
+      <label>รอบ/เดือนที่เบิก (เช่น ก.ย. 2569):</label>
+      <input id="periodInput" type="text" placeholder="ก.ย. 2569" oninput="changePeriod()">
+      <label>สลับดูรอบเดิม:</label>
+      <select id="periodSelect" onchange="selectExistingPeriod()"></select>
+    </div>
+
+    <h3>เพิ่มรายการเบิกยา</h3>
+    <div class="row">
+      <label>วันที่เบิก:</label><input type="date" id="txDate">
+      <label>สถานที่เบิก:</label>
+      <select id="txLocation"><option value="ห้องยา">ห้องยา</option><option value="OR">OR</option></select>
+      <label>รายการยา:</label>
+      <select id="txDrug"></select>
+      <label>จำนวนที่เบิก:</label><input type="number" id="txQty" min="0">
+      <button class="btn green" onclick="addTx()">+ เพิ่มรายการ</button>
+    </div>
+
+    <div class="tableWrap">
+      <table id="txTable"></table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>ส่วนที่ 1.2 — สรุปยอดเบิก–คงเหลือรายเดือน (ตามรูปแบบใบเบิกยา)</h2>
+    <div class="tableWrap">
+      <table id="summary1Table"></table>
+    </div>
+    <p class="hint">* "แนะนำคงเหลือ" คำนวณจาก ยกมา + รับ − ใบสั่ง ใช้เทียบกับยอดนับจริง แล้วกรอกคงเหลือเอง — ทุกครั้งที่แก้ตัวเลขจะบันทึกขึ้น Google Sheet อัตโนมัติ</p>
+  </div>
+</section>
+
+<!-- ============ ส่วนที่ 2 : นับสต็อกห้องยา ============ -->
+<section id="tab2" class="hidden">
+  <div class="card">
+    <h2>ส่วนที่ 2 — การนับสต็อกห้องยา</h2>
+    <div class="row">
+      <label>วันที่นับ:</label><input type="date" id="stockDate" onchange="renderStock2()">
+      <button class="btn green" onclick="saveStock2()">💾 บันทึกขึ้น Google Sheet</button>
+    </div>
+    <div class="tableWrap">
+      <table id="stock2Table"></table>
+    </div>
+    <h3>ประวัติการนับที่บันทึกไว้</h3>
+    <div class="histList" id="stock2History"></div>
+  </div>
+</section>
+
+<!-- ============ ส่วนที่ 3 : สรุปยอดตามสถานที่ ============ -->
+<section id="tab3" class="hidden">
+  <div class="card">
+    <h2>ส่วนที่ 3 — สรุปยอดคงเหลือตามสถานที่ (คลังยา / ห้องยา / คลังใหญ่ / OR)</h2>
+    <div class="row">
+      <label>วันที่สรุป:</label><input type="date" id="reportDate" onchange="renderLocationSummary()">
+      <label>รอบ/เดือนอ้างอิง (จากส่วนที่ 1):</label>
+      <select id="reportPeriodSelect"></select>
+      <button class="btn gray" onclick="pullFromPart1And2()">⟳ ดึงข้อมูลจากส่วนที่ 1 และส่วนที่ 2</button>
+      <button class="btn green" onclick="saveLocationSummary()">💾 บันทึกขึ้น Google Sheet</button>
+    </div>
+    <p class="hint">* ปุ่มดึงข้อมูลจะเติม "ห้องยา" จากยอดนับจริงของส่วนที่ 2 (ตามวันที่สรุป) และเติม "จ่ายตามใบสั่ง" จากช่อง "ใบสั่ง" ของส่วนที่ 1 (ตามรอบ/เดือนที่เลือก) ให้อัตโนมัติ — ส่วน คลังยา/คลังใหญ่/OR กรอกเองตามจริง</p>
+    <div class="tableWrap">
+      <table id="locationSummaryTable"></table>
+    </div>
+    <h3>ประวัติที่บันทึกไว้</h3>
+    <div class="histList" id="locationSummaryHistory"></div>
+  </div>
+</section>
+
+</main>
+
+<script>
+/* ============== CONSTANT DATA ============== */
+const DRUGS_A = [
+  {name:"Morphine inj.", unit:"Amp."},
+  {name:"Pethidine inj.", unit:"Amp."},
+  {name:"Fentanyl inj.", unit:"Amp."},
+  {name:"Morphine syr.", unit:"Bot."},
+  {name:"Ephedrine inj.", unit:"Amp."},
+  {name:"Ketamine inj.", unit:"ML."},
+  {name:"Midazolam inj.", unit:"Amp."},
+  {name:"Alprazolam tab.", unit:"Tab."},
+  {name:"Pseudoephedrine tab.", unit:"Tab."},
+  {name:"Pseudoephedrine syr.", unit:"Bot."},
+  {name:"Concerta tab.", unit:"Tab."},
+  {name:"Etomidate inj.", unit:"Amp."}
+];
+
+const DRUGS_B = [
+  "Alprazolam tab 0.25 mg (ว.2)",
+  "Clonazepam tab 0.5 mg (ว.4)",
+  "Clorazepate cap 5 mg (ว.4)",
+  "Diazepam tab 2 mg (ว.4)",
+  "Diazepam tab 5 mg (ว.4)",
+  "Diazepam inj 10 mg/2 ml (ว.4)",
+  "Lorazepam tab 0.5 mg (ว.4)",
+  "Lorazepam tab 1 mg (ว.4)",
+  "Cebalax tab/Tumax cap (ว.4)",
+  "Phenobarbital tab 65 mg (ว.4)",
+  "Codeine+Guaifenesin tab (ยส.3)",
+  "TWC(Para+Codeine) tab (ยส.3)",
+  "Pseudoephedrine tab 60 mg (ว.2)",
+  "Pseudoephedrine syr 30 mg/5 ml (ว.2)",
+  "Morphine syr 10 mg/5 ml (ยส.2)",
+  "Morphine inj 10 mg/1 ml (ยส.2)",
+  "Pethidine inj 50 mg/1 ml (ยส.2)",
+  "Fentanyl inj 100 mcg/2 ml (ยส.2)",
+  "Midazolam inj 5 mg/1 ml (ว.2)",
+  "Concerta tab 36 mg (ว.2)"
+];
+
+const MAP_A_TO_B = {
+  "Morphine inj.": "Morphine inj 10 mg/1 ml (ยส.2)",
+  "Pethidine inj.": "Pethidine inj 50 mg/1 ml (ยส.2)",
+  "Fentanyl inj.": "Fentanyl inj 100 mcg/2 ml (ยส.2)",
+  "Morphine syr.": "Morphine syr 10 mg/5 ml (ยส.2)",
+  "Midazolam inj.": "Midazolam inj 5 mg/1 ml (ว.2)",
+  "Alprazolam tab.": "Alprazolam tab 0.25 mg (ว.2)",
+  "Pseudoephedrine tab.": "Pseudoephedrine tab 60 mg (ว.2)",
+  "Pseudoephedrine syr.": "Pseudoephedrine syr 30 mg/5 ml (ว.2)",
+  "Concerta tab.": "Concerta tab 36 mg (ว.2)"
+};
+
+/* ============== STATE ============== */
+let SCRIPT_URL = localStorage.getItem("scriptUrl") || "";
+let state = { tx: [], summary1: {}, stock2: {}, locationSummary: {}, period: localStorage.getItem("lastPeriod") || "" };
+
+function setStatus(msg, isError){
+  const el = document.getElementById("statusMsg");
+  el.textContent = msg;
+  el.className = isError ? "bad" : "ok";
+  if(!isError) setTimeout(()=>{ if(el.textContent===msg) el.textContent=""; }, 3000);
+}
+
+function saveScriptUrl(){
+  SCRIPT_URL = document.getElementById("scriptUrlInput").value.trim();
+  localStorage.setItem("scriptUrl", SCRIPT_URL);
+  if(SCRIPT_URL) refreshFromSheet();
+}
+
+async function apiGet(){
+  if(!SCRIPT_URL){ setStatus("กรุณาวาง Web App URL ก่อนใช้งาน", true); return null; }
+  setStatus("กำลังโหลดข้อมูล...");
+  try{
+    const res = await fetch(SCRIPT_URL + "?action=getAll");
+    const json = await res.json();
+    setStatus("โหลดข้อมูลล่าสุดแล้ว");
+    return json;
+  }catch(err){
+    setStatus("โหลดข้อมูลล้มเหลว: " + err.message, true);
+    return null;
+  }
+}
+
+async function apiPost(payload){
+  if(!SCRIPT_URL){ setStatus("กรุณาวาง Web App URL ก่อนใช้งาน", true); return null; }
+  setStatus("กำลังบันทึก...");
+  try{
+    const res = await fetch(SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if(json.ok){ setStatus("บันทึกขึ้น Google Sheet สำเร็จ"); }
+    else{ setStatus("บันทึกล้มเหลว: " + json.error, true); }
+    return json;
+  }catch(err){
+    setStatus("บันทึกล้มเหลว: " + err.message, true);
+    return null;
+  }
+}
+
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+function thDate(iso){
+  if(!iso) return "-";
+  const parts = iso.split("-");
+  if(parts.length!==3) return iso;
+  const [y,m,d] = parts;
+  return `${d}/${m}/${Number(y)+543}`;
+}
+
+async function refreshFromSheet(){
+  const json = await apiGet();
+  if(!json) return;
+
+  state.tx = (json.tx||[]).map(r=>({id:r.id, period:r.period, date:r.date, location:r.location, drug:r.drug, qty:Number(r.qty)||0}));
+
+  state.summary1 = {};
+  (json.summary1||[]).forEach(r=>{
+    state.summary1[r.period+"|"+r.drug] = {bf:Number(r.bf)||0, received:Number(r.received)||0, presc:Number(r.presc)||0, remain:Number(r.remain)||0};
+  });
+
+  state.stock2 = {};
+  (json.stock2||[]).forEach(r=>{
+    if(!state.stock2[r.date]) state.stock2[r.date] = {};
+    state.stock2[r.date][r.drug] = {actual:Number(r.actual)||0, com:Number(r.com)||0};
+  });
+
+  state.locationSummary = {};
+  (json.report3||[]).forEach(r=>{
+    if(!state.locationSummary[r.date]) state.locationSummary[r.date] = {};
+    state.locationSummary[r.date][r.drug] = {
+      klang:Number(r.klang)||0, hongya:Number(r.hongya)||0, klangyai:Number(r.klangyai)||0,
+      or:Number(r.or)||0, presc:Number(r.presc)||0, unit:r.unit||"", note:r.note||""
+    };
+  });
+
+  renderWithdrawalTab(); renderStock2(); renderLocationSummary();
+}
+
+/* ============== TAB SWITCH ============== */
+function showTab(n){
+  [1,2,3].forEach(i=>{
+    document.getElementById("tab"+i).classList.toggle("hidden", i!==n);
+    document.getElementById("navBtn"+i).classList.toggle("active", i===n);
+  });
+}
+
+/* ============== ส่วนที่ 1 : เบิกยาจากคลัง ============== */
+function fillDrugSelectA(sel){
+  sel.innerHTML = DRUGS_A.map(d=>`<option value="${d.name}">${d.name}</option>`).join("");
+}
+
+function getAllPeriods(){
+  return [...new Set(state.tx.map(t=>t.period).concat(Object.keys(state.summary1).map(k=>k.split("|")[0])))].filter(p=>p);
+}
+
+function changePeriod(){
+  state.period = document.getElementById("periodInput").value.trim();
+  localStorage.setItem("lastPeriod", state.period);
+  renderWithdrawalTab();
+}
+
+function selectExistingPeriod(){
+  const v = document.getElementById("periodSelect").value;
+  if(v){
+    state.period = v;
+    document.getElementById("periodInput").value = v;
+    localStorage.setItem("lastPeriod", state.period);
+    renderWithdrawalTab();
+  }
+}
+
+async function addTx(){
+  const date = document.getElementById("txDate").value;
+  const location = document.getElementById("txLocation").value;
+  const drug = document.getElementById("txDrug").value;
+  const qty = Number(document.getElementById("txQty").value);
+  if(!date){ alert("กรุณาระบุวันที่เบิก"); return; }
+  if(!qty || qty<=0){ alert("กรุณาระบุจำนวนที่เบิกให้ถูกต้อง"); return; }
+  const item = {id:uid(), period: state.period, date, location, drug, qty};
+  state.tx.push(item);
+  renderWithdrawalTab();
+  document.getElementById("txQty").value = "";
+  await apiPost({action:"addTx", ...item});
+}
+
+async function deleteTx(id){
+  if(!confirm("ลบรายการนี้?")) return;
+  state.tx = state.tx.filter(t=>t.id!==id);
+  renderWithdrawalTab();
+  await apiPost({action:"deleteTx", id});
+}
+
+function sumTx(drug, location){
+  return state.tx
+    .filter(t=>t.period===state.period && t.drug===drug && t.location===location)
+    .reduce((s,t)=>s+Number(t.qty||0),0);
+}
+
+function getSummaryEntry(drug, period){
+  const p = period!==undefined ? period : state.period;
+  const k = p + "|" + drug;
+  if(!state.summary1[k]) state.summary1[k] = {bf:0, received:0, presc:0, remain:0};
+  return state.summary1[k];
+}
+
+async function updateSummaryField(drug, field, value){
+  const e = getSummaryEntry(drug);
+  e[field] = Number(value)||0;
+  renderWithdrawalTab();
+  await apiPost({action:"saveSummary1", period: state.period, drug, bf:e.bf, received:e.received, presc:e.presc, remain:e.remain});
+}
+
+function renderWithdrawalTab(){
+  document.getElementById("periodInput").value = state.period;
+  const periods = getAllPeriods();
+  const sel = document.getElementById("periodSelect");
+  sel.innerHTML = `<option value="">-- เลือกรอบที่เคยบันทึก --</option>` + periods.map(p=>`<option value="${p}">${p}</option>`).join("");
+
+  // keep ส่วนที่ 3's period dropdown in sync
+  const sel3 = document.getElementById("reportPeriodSelect");
+  if(sel3){
+    const prevVal = sel3.value;
+    sel3.innerHTML = `<option value="">-- เลือกรอบ --</option>` + periods.map(p=>`<option value="${p}">${p}</option>`).join("");
+    if(periods.includes(prevVal)) sel3.value = prevVal;
+  }
+
+  fillDrugSelectA(document.getElementById("txDrug"));
+
+  const txFiltered = state.tx.filter(t=>t.period===state.period).sort((a,b)=> a.date.localeCompare(b.date));
+  let html = `<tr><th>วันที่</th><th>สถานที่เบิก</th><th>รายการยา</th><th>จำนวน</th><th class="no-print">ลบ</th></tr>`;
+  if(txFiltered.length===0){
+    html += `<tr><td colspan="5">ยังไม่มีรายการเบิกในรอบนี้</td></tr>`;
+  }
+  txFiltered.forEach(t=>{
+    html += `<tr>
+      <td>${thDate(t.date)}</td><td>${t.location}</td><td>${t.drug}</td><td>${t.qty}</td>
+      <td class="no-print"><button class="histBtn" onclick="deleteTx('${t.id}')">ลบ</button></td>
+    </tr>`;
+  });
+  document.getElementById("txTable").innerHTML = html;
+
+  let h2 = `<tr><th>ยา</th><th>ยกมา</th><th>รวมเบิกห้องยา</th><th>รวมเบิก OR</th><th>รับ</th><th>ใบสั่ง</th><th>คงเหลือ</th><th>แนะนำคงเหลือ</th></tr>`;
+  DRUGS_A.forEach(d=>{
+    const e = getSummaryEntry(d.name);
+    const sumRoom = sumTx(d.name,"ห้องยา");
+    const sumOR = sumTx(d.name,"OR");
+    const suggested = e.bf + e.received - e.presc;
+    h2 += `<tr>
+      <td style="text-align:left">${d.name}</td>
+      <td><input type="number" value="${e.bf}" onchange="updateSummaryField('${d.name}','bf',this.value)"></td>
+      <td>${sumRoom}</td><td>${sumOR}</td>
+      <td><input type="number" value="${e.received}" onchange="updateSummaryField('${d.name}','received',this.value)"></td>
+      <td><input type="number" value="${e.presc}" onchange="updateSummaryField('${d.name}','presc',this.value)"></td>
+      <td><input type="number" value="${e.remain}" onchange="updateSummaryField('${d.name}','remain',this.value)"></td>
+      <td>${suggested}</td>
+    </tr>`;
+  });
+  document.getElementById("summary1Table").innerHTML = h2;
+}
+
+/* ============== ส่วนที่ 2 : นับสต็อกห้องยา ============== */
+function renderStock2(){
+  const date = document.getElementById("stockDate").value;
+  const data = state.stock2[date] || {};
+
+  let html = `<tr><th>ยา</th><th>ของจริง</th><th>หน้าร้าน/COM</th><th>ผลต่าง</th></tr>`;
+  DRUGS_B.forEach(name=>{
+    const v = data[name] || {actual:0, com:0};
+    const diff = Number(v.actual||0) - Number(v.com||0);
+    html += `<tr>
+      <td style="text-align:left">${name}</td>
+      <td><input type="number" id="s2_actual_${encodeURIComponent(name)}" value="${v.actual}"></td>
+      <td><input type="number" id="s2_com_${encodeURIComponent(name)}" value="${v.com}"></td>
+      <td class="${diff===0?'ok':'bad'}">${diff===0?'ตรงกัน':(diff>0?'+'+diff:diff)}</td>
+    </tr>`;
+  });
+  document.getElementById("stock2Table").innerHTML = html;
+
+  const dates = Object.keys(state.stock2).sort();
+  document.getElementById("stock2History").innerHTML = dates.length
+    ? dates.map(d=>`<span class="histBtn" onclick="document.getElementById('stockDate').value='${d}'; renderStock2();">${thDate(d)}</span>`).join("")
+    : "<span class='hint'>ยังไม่มีประวัติ</span>";
+}
+
+async function saveStock2(){
+  const date = document.getElementById("stockDate").value;
+  if(!date){ alert("กรุณาระบุวันที่นับสต็อก"); return; }
+  const data = {};
+  const rows = [];
+  DRUGS_B.forEach(name=>{
+    const actual = Number(document.getElementById(`s2_actual_${encodeURIComponent(name)}`).value)||0;
+    const com = Number(document.getElementById(`s2_com_${encodeURIComponent(name)}`).value)||0;
+    data[name] = {actual, com};
+    rows.push({date, drug:name, actual, com});
+  });
+  state.stock2[date] = data;
+  renderStock2();
+  await apiPost({action:"saveStock2Day", date, rows});
+}
+
+/* ============== ส่วนที่ 3 : สรุปยอดตามสถานที่ ============== */
+function renderLocationSummary(){
+  const date = document.getElementById("reportDate").value;
+  const data = state.locationSummary[date] || {};
+
+  let html = `<tr>
+    <th>ยา</th><th>คลังยา</th><th>ห้องยา</th><th>คลังใหญ่</th><th>OR</th>
+    <th>คงเหลือจริง</th><th>จ่ายตามใบสั่ง</th><th>คงเหลือตามรายงาน</th><th>หน่วย</th><th>หมายเหตุ</th>
+  </tr>`;
+  DRUGS_A.forEach(d=>{
+    const v = Object.assign({klang:0,hongya:0,klangyai:0,or:0,presc:0,unit:d.unit,note:""}, data[d.name]||{});
+    const realLeft = Number(v.klang)+Number(v.hongya)+Number(v.klangyai)+Number(v.or);
+    const reportLeft = realLeft - Number(v.presc);
+    const enc = encodeURIComponent(d.name);
+    html += `<tr>
+      <td style="text-align:left">${d.name}</td>
+      <td><input type="number" id="r3_klang_${enc}" value="${v.klang}"></td>
+      <td><input type="number" id="r3_hongya_${enc}" value="${v.hongya}"></td>
+      <td><input type="number" id="r3_klangyai_${enc}" value="${v.klangyai}"></td>
+      <td><input type="number" id="r3_or_${enc}" value="${v.or}"></td>
+      <td id="r3_realleft_${enc}">${realLeft}</td>
+      <td><input type="number" id="r3_presc_${enc}" value="${v.presc}" onchange="recalcLocationRow('${d.name}')"></td>
+      <td id="r3_reportleft_${enc}">${reportLeft}</td>
+      <td><input type="text" id="r3_unit_${enc}" value="${v.unit}" style="width:60px"></td>
+      <td><input type="text" id="r3_note_${enc}" value="${v.note}" style="width:90px"></td>
+    </tr>`;
+  });
+  document.getElementById("locationSummaryTable").innerHTML = html;
+
+  DRUGS_A.forEach(d=>{
+    const enc = encodeURIComponent(d.name);
+    ["klang","hongya","klangyai","or"].forEach(f=>{
+      const el = document.getElementById(`r3_${f}_${enc}`);
+      if(el) el.addEventListener("input", ()=>recalcLocationRow(d.name));
+    });
+  });
+
+  const dates = Object.keys(state.locationSummary).sort();
+  document.getElementById("locationSummaryHistory").innerHTML = dates.length
+    ? dates.map(d=>`<span class="histBtn" onclick="document.getElementById('reportDate').value='${d}'; renderLocationSummary();">${thDate(d)}</span>`).join("")
+    : "<span class='hint'>ยังไม่มีประวัติ</span>";
+}
+
+function recalcLocationRow(drugName){
+  const enc = encodeURIComponent(drugName);
+  const klang = Number(document.getElementById(`r3_klang_${enc}`).value)||0;
+  const hongya = Number(document.getElementById(`r3_hongya_${enc}`).value)||0;
+  const klangyai = Number(document.getElementById(`r3_klangyai_${enc}`).value)||0;
+  const or_ = Number(document.getElementById(`r3_or_${enc}`).value)||0;
+  const presc = Number(document.getElementById(`r3_presc_${enc}`).value)||0;
+  const realLeft = klang+hongya+klangyai+or_;
+  document.getElementById(`r3_realleft_${enc}`).textContent = realLeft;
+  document.getElementById(`r3_reportleft_${enc}`).textContent = realLeft - presc;
+}
+
+async function saveLocationSummary(){
+  const date = document.getElementById("reportDate").value;
+  if(!date){ alert("กรุณาระบุวันที่สรุปยอด"); return; }
+  const data = {};
+  const rows = [];
+  DRUGS_A.forEach(d=>{
+    const enc = encodeURIComponent(d.name);
+    const v = {
+      klang: Number(document.getElementById(`r3_klang_${enc}`).value)||0,
+      hongya: Number(document.getElementById(`r3_hongya_${enc}`).value)||0,
+      klangyai: Number(document.getElementById(`r3_klangyai_${enc}`).value)||0,
+      or: Number(document.getElementById(`r3_or_${enc}`).value)||0,
+      presc: Number(document.getElementById(`r3_presc_${enc}`).value)||0,
+      unit: document.getElementById(`r3_unit_${enc}`).value,
+      note: document.getElementById(`r3_note_${enc}`).value
+    };
+    data[d.name] = v;
+    rows.push({date, drug:d.name, ...v});
+  });
+  state.locationSummary[date] = data;
+  renderLocationSummary();
+  await apiPost({action:"saveReport3Day", date, rows});
+}
+
+/* ดึง "ห้องยา" จากส่วนที่ 2 (ตามวันที่) + ดึง "จ่ายตามใบสั่ง" จากส่วนที่ 1 (ตามรอบที่เลือก) */
+function pullFromPart1And2(){
+  const date = document.getElementById("reportDate").value;
+  const period = document.getElementById("reportPeriodSelect").value;
+  if(!date){ alert("กรุณาระบุวันที่สรุปยอดก่อน"); return; }
+
+  const stockData = state.stock2[date];
+  let pulledStock = false, pulledPresc = false;
+
+  DRUGS_A.forEach(d=>{
+    const enc = encodeURIComponent(d.name);
+
+    // ดึง ห้องยา จากยอดนับจริง (ส่วนที่ 2) ของวันที่เลือก
+    const nameB = MAP_A_TO_B[d.name];
+    if(stockData && nameB && stockData[nameB]){
+      const el = document.getElementById(`r3_hongya_${enc}`);
+      if(el){ el.value = stockData[nameB].actual; pulledStock = true; }
+    }
+
+    // ดึง จ่ายตามใบสั่ง จากช่อง "ใบสั่ง" ของส่วนที่ 1 ตามรอบที่เลือก
+    if(period){
+      const e = state.summary1[period+"|"+d.name];
+      if(e){
+        const elp = document.getElementById(`r3_presc_${enc}`);
+        if(elp){ elp.value = e.presc; pulledPresc = true; }
+      }
+    }
+
+    recalcLocationRow(d.name);
+  });
+
+  if(!stockData && !period){
+    alert("ไม่พบข้อมูลวันที่นี้ในส่วนที่ 2 และยังไม่ได้เลือกรอบจากส่วนที่ 1");
+    return;
+  }
+  let msg = [];
+  if(pulledStock) msg.push('"ห้องยา" จากส่วนที่ 2');
+  if(pulledPresc) msg.push('"จ่ายตามใบสั่ง" จากส่วนที่ 1');
+  alert('ดึง '+(msg.join(' และ ')||'ไม่มีข้อมูลที่ตรงกัน')+' เรียบร้อย กรุณาตรวจสอบก่อนบันทึก');
+}
+
+/* ============== INIT ============== */
+window.onload = function(){
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById("txDate").value = today;
+  document.getElementById("stockDate").value = today;
+  document.getElementById("reportDate").value = today;
+  document.getElementById("scriptUrlInput").value = SCRIPT_URL;
+  renderWithdrawalTab(); renderStock2(); renderLocationSummary();
+  if(SCRIPT_URL) refreshFromSheet();
+};
+</script>
+</body>
+</html>
